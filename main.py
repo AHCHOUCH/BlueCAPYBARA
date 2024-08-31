@@ -27,7 +27,7 @@ intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # VirusTotal API setup
-VIRUSTOTAL_API_KEY = os.getenv('06fef46b4838dba2fb35713d2e7a1d1ecd2ce71556baba1162a7b31808417c6b')
+VIRUSTOTAL_API_KEY = os.getenv('VIRUSTOTAL_API_KEY')
 VIRUSTOTAL_API_URL = 'https://www.virustotal.com/api/v3/urls'
 
 # Rate limiting setup
@@ -102,4 +102,4 @@ async def scan(ctx, url):
 keep_alive()
 
 # Run the bot
-bot.run(os.getenv('ukMkZ7hX89QgyZdsxwGA_IL8-ea_DTe7'))
+bot.run(os.getenv('DISCORD_TOKEN'))
