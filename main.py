@@ -102,4 +102,4 @@ async def scan(ctx, url):
 keep_alive()
 
 # Run the bot
-bot.run(os.getenv('DISCORD_TOKEN'))
+bot.run(os.getenv('ukMkZ7hX89QgyZdsxwGA_IL8-ea_DTe7'))
