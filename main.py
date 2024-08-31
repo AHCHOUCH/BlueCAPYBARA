@@ -15,6 +15,20 @@ print("Environment Variables:")
 print(f"DISCORD_TOKEN: {os.getenv('DISCORD_TOKEN')}")
 print(f"VIRUSTOTAL_API_KEY: {os.getenv('VIRUSTOTAL_API_KEY')}")
 
+# Flask app to keep the bot alive
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "I'm alive"
+
+def run():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+
 # Bot setup
 intents = discord.Intents.default()
 intents.message_content = True
