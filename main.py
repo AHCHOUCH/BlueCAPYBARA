@@ -163,15 +163,17 @@ async def on_message(message):
 
     # Check for URLs in the message
     words = message.content.split()
+    scanned_urls = set()  # To keep track of URLs we've already scanned in this message
     for word in words:
-        if word.startswith(('http://', 'https://')):
-            await message.channel.send(f"🔍 Scanning URL: {word}")
+        if word.startswith(('http://', 'https://')) and word not in scanned_urls:
+            scanned_urls.add(word)
+            scanning_message = await message.channel.send(f"🔍 Scanning URL: {word}")
             result = await scan_url(word)
             
             if isinstance(result, dict):
                 stats = result['stats']
                 risk_message = generate_risk_message(stats, word)
-                await message.channel.send(risk_message)
+                await scanning_message.edit(content=risk_message)
                 
                 # Send report to "announcement" channel if the URL is malicious
                 if stats['malicious'] > 0:
@@ -185,20 +187,10 @@ async def on_message(message):
                         announcement += "Please take appropriate action."
                         await announcement_channel.send(announcement)
             else:
-                await message.channel.send(result)
+                await scanning_message.edit(content=result)
 
     await bot.process_commands(message)
 
-# Command to manually scan a URL
-@bot.command(name='scan')
-async def scan(ctx, url):
-    await ctx.send(f"🔍 Scanning URL: {url}")
-    result = await scan_url(url)
-    if isinstance(result, dict):
-        risk_message = generate_risk_message(result['stats'], url)
-        await ctx.send(risk_message)
-    else:
-        await ctx.send(result)
 
 # Start the Flask server
 keep_alive()
