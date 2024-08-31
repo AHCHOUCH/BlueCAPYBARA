@@ -1,4 +1,5 @@
 import os
+from dotenv import load_dotenv
 import discord
 from discord.ext import commands
 import requests
@@ -6,20 +7,13 @@ import asyncio
 from flask import Flask
 from threading import Thread
 
-# Flask app to keep the bot alive
-app = Flask('')
+# Load environment variables
+load_dotenv()  # This will load variables from .env file if it exists
 
-@app.route('/')
-def home():
-    return "I'm alive"
-
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
-# Start the Flask server in a separate thread
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
+# Debug: Print environment variables
+print("Environment Variables:")
+print(f"DISCORD_TOKEN: {os.getenv('DISCORD_TOKEN')}")
+print(f"VIRUSTOTAL_API_KEY: {os.getenv('VIRUSTOTAL_API_KEY')}")
 
 # Bot setup
 intents = discord.Intents.default()
@@ -102,4 +96,8 @@ async def scan(ctx, url):
 keep_alive()
 
 # Run the bot
-bot.run(os.getenv('DISCORD_TOKEN'))
+token = os.getenv('DISCORD_TOKEN')
+if token:
+    bot.run(token)
+else:
+    print("Error: DISCORD_TOKEN not found in environment variables")
