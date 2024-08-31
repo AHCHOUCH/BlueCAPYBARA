@@ -6,16 +6,10 @@ import requests
 import asyncio
 from flask import Flask
 from threading import Thread
-import json
 import time
 
 # Load environment variables
 load_dotenv()
-
-# Debug: Print environment variables
-print("Environment Variables:")
-print(f"DISCORD_TOKEN: {os.getenv('DISCORD_TOKEN')}")
-print(f"VIRUSTOTAL_API_KEY: {os.getenv('VIRUSTOTAL_API_KEY')}")
 
 # Flask app to keep the bot alive
 app = Flask('')
@@ -24,12 +18,8 @@ app = Flask('')
 def home():
     return "I'm alive"
 
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
 def keep_alive():
-    t = Thread(target=run)
-    t.start()
+    Thread(target=lambda: app.run(host='0.0.0.0', port=8080)).start()
 
 # Bot setup with explicit intents
 intents = discord.Intents.default()
@@ -48,8 +38,7 @@ async def check_rate_limit():
     now = time.time()
     request_times[:] = [t for t in request_times if now - t < 60]
     if len(request_times) >= MAX_REQUESTS_PER_MINUTE:
-        wait_time = 60 - (now - request_times[0])
-        await asyncio.sleep(wait_time)
+        await asyncio.sleep(60 - (now - request_times[0]))
     request_times.append(now)
 
 async def scan_url(url):
@@ -65,88 +54,42 @@ async def scan_url(url):
         response = requests.post(VIRUSTOTAL_API_URL, headers=headers, data=data)
         response.raise_for_status()
         result = response.json()
-        analysis_id = result['data']['id']
-        return await get_analysis_result(analysis_id)
+        return await get_analysis_result(result['data']['id'])
     except requests.exceptions.RequestException as e:
         print(f"Error in scan_url: {str(e)}")
-        if hasattr(e, 'response') and e.response is not None:
-            print(f"Response content: {e.response.content}")
         return f"Error scanning URL: {str(e)}"
 
 async def get_analysis_result(analysis_id):
     await check_rate_limit()
-    headers = {
-        "accept": "application/json",
-        "x-apikey": VIRUSTOTAL_API_KEY
-    }
+    headers = {"accept": "application/json", "x-apikey": VIRUSTOTAL_API_KEY}
     url = f"https://www.virustotal.com/api/v3/analyses/{analysis_id}"
-    
-    max_retries = 5
-    retry_delay = 10
 
-    for attempt in range(max_retries):
+    for attempt in range(5):
         try:
             response = requests.get(url, headers=headers)
             response.raise_for_status()
             result = response.json()
             
-            status = result['data']['attributes']['status']
-            if status == 'completed':
+            if result['data']['attributes']['status'] == 'completed':
                 return result['data']['attributes']
-            elif status == 'queued' or status == 'in-progress':
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(retry_delay)
-                    continue
-                else:
-                    return "Analysis is still in progress. Please try again later."
+            await asyncio.sleep(10)
         except requests.exceptions.RequestException as e:
             print(f"Error in get_analysis_result (attempt {attempt + 1}): {str(e)}")
-            if hasattr(e, 'response') and e.response is not None:
-                print(f"Response content: {e.response.content}")
-            if attempt < max_retries - 1:
-                await asyncio.sleep(retry_delay)
-            else:
-                return f"Error getting analysis result after {max_retries} attempts: {str(e)}"
-
+            if attempt == 4:
+                return f"Error getting analysis result: {str(e)}"
+    
     return "Failed to get analysis result after multiple attempts."
 
 def generate_risk_message(stats, url):
-    total_scans = sum(stats.values())
-    malicious = stats['malicious']
-    suspicious = stats['suspicious']
+    malicious, suspicious, harmless = stats['malicious'], stats['suspicious'], stats['harmless']
+    risk_level, emoji = ("High", "🚨") if malicious > 0 else ("Medium", "⚠️") if suspicious > 0 else ("Low", "✅")
     
-    if malicious > 0:
-        risk_level = "High"
-        emoji = "🚨"
-    elif suspicious > 0:
-        risk_level = "Medium"
-        emoji = "⚠️"
-    else:
-        risk_level = "Low"
-        emoji = "✅"
-    
-    potential_risks = [
-        "Malware infection",
-        "Phishing attempt",
-        "Data theft",
-        "Identity theft",
-        "Financial fraud"
-    ]
-    
-    risk_message = f"{emoji} **URL Risk Assessment**\n\n"
-    risk_message += f"**URL:** {url}\n"
-    risk_message += f"**Risk Level: {risk_level}**\n\n"
-    risk_message += f"**Scan Results:**\n"
-    risk_message += f"- Malicious: {malicious}\n"
-    risk_message += f"- Suspicious: {suspicious}\n"
-    risk_message += f"- Clean: {stats['harmless']}\n\n"
+    risk_message = (f"{emoji} **URL Risk Assessment**\n\n**URL:** {url}\n**Risk Level: {risk_level}**\n\n"
+                    f"**Scan Results:**\n- Malicious: {malicious}\n- Suspicious: {suspicious}\n- Clean: {harmless}\n\n")
     
     if risk_level != "Low":
-        risk_message += "**Potential Risks:**\n"
-        for risk in potential_risks[:3]:  # List top 3 risks
-            risk_message += f"- {risk}\n"
-        
-        risk_message += "\n⚠️ **WARNING:** Visiting this URL may put your system and personal information at risk. Proceed with caution!"
+        risk_message += ("**Potential Risks:**\n- Malware infection\n- Phishing attempt\n- Data theft\n"
+                         "⚠️ **WARNING:** Visiting this URL may put your system and personal information at risk. Proceed with caution!")
     else:
         risk_message += "✅ This URL appears to be safe, but always exercise caution when clicking on links."
     
@@ -161,10 +104,8 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    # Check for URLs in the message
-    words = message.content.split()
     scanned_urls = set()  # To keep track of URLs we've already scanned in this message
-    for word in words:
+    for word in message.content.split():
         if word.startswith(('http://', 'https://')) and word not in scanned_urls:
             scanned_urls.add(word)
             scanning_message = await message.channel.send(f"🔍 Scanning URL: {word}")
@@ -172,32 +113,25 @@ async def on_message(message):
             
             if isinstance(result, dict):
                 stats = result['stats']
-                risk_message = generate_risk_message(stats, word)
-                await scanning_message.edit(content=risk_message)
+                await scanning_message.edit(content=generate_risk_message(stats, word))
                 
-                # Send report to "announcement" channel if the URL is malicious
                 if stats['malicious'] > 0:
                     announcement_channel = discord.utils.get(message.guild.channels, name='announcement')
                     if announcement_channel:
-                        announcement = f"🚨 **Malicious URL Alert**\n\n"
-                        announcement += f"User {message.author.mention} posted a malicious URL in {message.channel.mention}.\n"
-                        announcement += f"URL: {word}\n"
-                        announcement += f"Malicious detections: {stats['malicious']}\n"
-                        announcement += f"Suspicious detections: {stats['suspicious']}\n\n"
-                        announcement += "Please take appropriate action."
+                        announcement = (f"🚨 **Malicious URL Alert**\n\nUser {message.author.mention} posted a malicious URL in "
+                                        f"{message.channel.mention}.\nURL: {word}\nMalicious detections: {stats['malicious']}\n"
+                                        f"Suspicious detections: {stats['suspicious']}\n\nPlease take appropriate action.")
                         await announcement_channel.send(announcement)
             else:
                 await scanning_message.edit(content=result)
 
     await bot.process_commands(message)
 
-
 # Start the Flask server
 keep_alive()
 
 # Run the bot
-token = os.getenv('DISCORD_TOKEN')
-if token:
+if (token := os.getenv('DISCORD_TOKEN')):
     bot.run(token)
 else:
     print("Error: DISCORD_TOKEN not found in environment variables")
