@@ -6,6 +6,7 @@ import requests
 import asyncio
 from flask import Flask
 from threading import Thread
+import json
 
 # Load environment variables
 load_dotenv()  # This will load variables from .env file if it exists
@@ -42,15 +43,6 @@ VIRUSTOTAL_API_URL = 'https://www.virustotal.com/api/v3/urls'
 MAX_REQUESTS_PER_MINUTE = 4
 request_times = []
 
-async def check_rate_limit():
-    global request_times
-    current_time = asyncio.get_event_loop().time()
-    request_times = [t for t in request_times if current_time - t < 60]
-    if len(request_times) >= MAX_REQUESTS_PER_MINUTE:
-        wait_time = 60 - (current_time - request_times[0])
-        await asyncio.sleep(wait_time)
-    request_times.append(current_time)
-
 async def scan_url(url):
     await check_rate_limit()
     headers = {
@@ -58,13 +50,46 @@ async def scan_url(url):
         "x-apikey": VIRUSTOTAL_API_KEY
     }
     data = {"url": url}
-    response = requests.post(VIRUSTOTAL_API_URL, headers=headers, data=data)
-    if response.status_code == 200:
+    print(f"Sending POST request to {VIRUSTOTAL_API_URL}")
+    print(f"Headers: {json.dumps(headers, indent=2)}")
+    print(f"Data: {json.dumps(data, indent=2)}")
+    
+    try:
+        response = requests.post(VIRUSTOTAL_API_URL, headers=headers, data=data)
+        response.raise_for_status()
         result = response.json()
+        print(f"Response: {json.dumps(result, indent=2)}")
         analysis_id = result['data']['id']
         return await get_analysis_result(analysis_id)
-    else:
-        return f"Error scanning URL: {response.status_code}"
+    except requests.exceptions.RequestException as e:
+        print(f"Error in scan_url: {str(e)}")
+        if hasattr(e, 'response') and e.response is not None:
+            print(f"Response content: {e.response.content}")
+        return f"Error scanning URL: {str(e)}"
+
+async def get_analysis_result(analysis_id):
+    await check_rate_limit()
+    headers = {
+        "accept": "application/json",
+        "x-apikey": VIRUSTOTAL_API_KEY
+    }
+    url = f"{VIRUSTOTAL_API_URL}/{analysis_id}"
+    print(f"Sending GET request to {url}")
+    print(f"Headers: {json.dumps(headers, indent=2)}")
+    
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        result = response.json()
+        print(f"Response: {json.dumps(result, indent=2)}")
+        stats = result['data']['attributes']['stats']
+        return f"Scan results: Malicious: {stats['malicious']}, Suspicious: {stats['suspicious']}, Harmless: {stats['harmless']}"
+    except requests.exceptions.RequestException as e:
+        print(f"Error in get_analysis_result: {str(e)}")
+        if hasattr(e, 'response') and e.response is not None:
+            print(f"Response content: {e.response.content}")
+        return f"Error getting analysis result: {str(e)}"
+
 
 async def get_analysis_result(analysis_id):
     await check_rate_limit()
