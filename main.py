@@ -60,15 +60,11 @@ async def scan_url(url):
         "content-type": "application/x-www-form-urlencoded"
     }
     data = {"url": url}
-    print(f"Sending POST request to {VIRUSTOTAL_API_URL}")
-    print(f"Headers: {json.dumps(headers, indent=2)}")
-    print(f"Data: {json.dumps(data, indent=2)}")
     
     try:
         response = requests.post(VIRUSTOTAL_API_URL, headers=headers, data=data)
         response.raise_for_status()
         result = response.json()
-        print(f"Response: {json.dumps(result, indent=2)}")
         analysis_id = result['data']['id']
         return await get_analysis_result(analysis_id)
     except requests.exceptions.RequestException as e:
@@ -84,8 +80,6 @@ async def get_analysis_result(analysis_id):
         "x-apikey": VIRUSTOTAL_API_KEY
     }
     url = f"https://www.virustotal.com/api/v3/analyses/{analysis_id}"
-    print(f"Sending GET request to {url}")
-    print(f"Headers: {json.dumps(headers, indent=2)}")
     
     max_retries = 5
     retry_delay = 10
@@ -95,15 +89,13 @@ async def get_analysis_result(analysis_id):
             response = requests.get(url, headers=headers)
             response.raise_for_status()
             result = response.json()
-            print(f"Response: {json.dumps(result, indent=2)}")
             
             status = result['data']['attributes']['status']
             if status == 'completed':
                 stats = result['data']['attributes']['stats']
-                return f"Scan results: Malicious: {stats['malicious']}, Suspicious: {stats['suspicious']}, Harmless: {stats['harmless']}"
+                return result['data']['attributes']
             elif status == 'queued' or status == 'in-progress':
                 if attempt < max_retries - 1:
-                    print(f"Analysis not complete. Retrying in {retry_delay} seconds...")
                     await asyncio.sleep(retry_delay)
                     continue
                 else:
@@ -113,12 +105,51 @@ async def get_analysis_result(analysis_id):
             if hasattr(e, 'response') and e.response is not None:
                 print(f"Response content: {e.response.content}")
             if attempt < max_retries - 1:
-                print(f"Retrying in {retry_delay} seconds...")
                 await asyncio.sleep(retry_delay)
             else:
                 return f"Error getting analysis result after {max_retries} attempts: {str(e)}"
 
     return "Failed to get analysis result after multiple attempts."
+
+def generate_risk_message(stats):
+    total_scans = sum(stats.values())
+    malicious = stats['malicious']
+    suspicious = stats['suspicious']
+    
+    if malicious > 0:
+        risk_level = "High"
+        emoji = "🚨"
+    elif suspicious > 0:
+        risk_level = "Medium"
+        emoji = "⚠️"
+    else:
+        risk_level = "Low"
+        emoji = "✅"
+    
+    potential_risks = [
+        "Malware infection",
+        "Phishing attempt",
+        "Data theft",
+        "Identity theft",
+        "Financial fraud"
+    ]
+    
+    risk_message = f"{emoji} **Risk Level: {risk_level}**\n\n"
+    risk_message += f"**Scan Results:**\n"
+    risk_message += f"- Malicious: {malicious}\n"
+    risk_message += f"- Suspicious: {suspicious}\n"
+    risk_message += f"- Clean: {stats['harmless']}\n\n"
+    
+    if risk_level != "Low":
+        risk_message += "**Potential Risks:**\n"
+        for risk in potential_risks[:3]:  # List top 3 risks
+            risk_message += f"- {risk}\n"
+        
+        risk_message += "\n⚠️ **WARNING:** Visiting this URL may put your system and personal information at risk. Proceed with caution!"
+    else:
+        risk_message += "✅ This URL appears to be safe, but always exercise caution when clicking on links."
+    
+    return risk_message
 
 @bot.event
 async def on_ready():
@@ -133,18 +164,39 @@ async def on_message(message):
     words = message.content.split()
     for word in words:
         if word.startswith(('http://', 'https://')):
-            await message.channel.send(f"Scanning URL: {word}")
+            await message.channel.send(f"🔍 Scanning URL: {word}")
             result = await scan_url(word)
-            await message.channel.send(result)
+            
+            if isinstance(result, dict):
+                stats = result['stats']
+                risk_message = generate_risk_message(stats)
+                await message.channel.send(risk_message)
+                
+                # Send report to "reports" channel if the URL is malicious
+                if stats['malicious'] > 0:
+                    reports_channel = discord.utils.get(message.guild.channels, name='reports')
+                    if reports_channel:
+                        report = f"🚨 **Malicious URL Detected**\n\n"
+                        report += f"User: {message.author.mention}\n"
+                        report += f"Channel: {message.channel.mention}\n"
+                        report += f"URL: {word}\n\n"
+                        report += risk_message
+                        await reports_channel.send(report)
+            else:
+                await message.channel.send(result)
 
     await bot.process_commands(message)
 
 # Command to manually scan a URL
 @bot.command(name='scan')
 async def scan(ctx, url):
-    await ctx.send(f"Scanning URL: {url}")
+    await ctx.send(f"🔍 Scanning URL: {url}")
     result = await scan_url(url)
-    await ctx.send(result)
+    if isinstance(result, dict):
+        risk_message = generate_risk_message(result['stats'])
+        await ctx.send(risk_message)
+    else:
+        await ctx.send(result)
 
 # Start the Flask server
 keep_alive()
