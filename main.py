@@ -147,29 +147,43 @@ async def on_message(message):
     words = message.content.split()
     scanned_urls = set()
     async with aiohttp.ClientSession() as session:
+        tasks = []
         for word in words:
             if word.startswith(('http://', 'https://')) and word not in scanned_urls:
                 scanned_urls.add(word)
-                scanning_message = await message.channel.send(f"🔍 Scanning URL: {word}")
-                result = await scan_url(session, word)
-                
-                if isinstance(result, dict):
-                    stats = result['stats']
-                    risk_message = generate_risk_message(stats, word)
-                    await scanning_message.edit(content=risk_message)
-                    
-                    if stats['malicious'] > 0:
-                        announcement_channel = discord.utils.get(message.guild.channels, name='announcement')
-                        if announcement_channel:
-                            announcement = (
-                                f"🚨 **Malicious URL Alert**\n\n"
-                                f"User {message.author.mention} posted a malicious URL in {message.channel.mention}.\n"
-                                f"URL: {word}\n"
-                                f"Malicious detections: {stats['malicious']}\n"
-                                f"Suspicious detections: {stats['suspicious']}\n\n"
-                                "Please take appropriate action."
-                            )
-                            await announcement_channel.send(announcement)
+                tasks.append(asyncio.create_task(scan_and_report(session, message.channel, word, message.author, message.guild)))
+        
+        if tasks:
+            await asyncio.gather(*tasks)
+
+    await bot.process_commands(message)
+
+async def scan_and_report(session, channel, url, author, guild):
+    scanning_message = await channel.send(f"🔍 Scanning URL: {url}")
+    result = await scan_url(session, url)
+    
+    if isinstance(result, dict):
+        stats = result['stats']
+        risk_message = generate_risk_message(stats, url)
+        await scanning_message.edit(content=risk_message)
+        
+        if stats['malicious'] > 0:
+            await send_announcement(guild, author, channel, url, stats)
+    else:
+        await scanning_message.edit(content=result)
+
+async def send_announcement(guild, author, channel, url, stats):
+    announcement_channel = discord.utils.get(guild.channels, name='announcement')
+    if announcement_channel:
+        announcement = (
+            f"🚨 **Malicious URL Alert**\n\n"
+            f"User {author.mention} posted a malicious URL in {channel.mention}.\n"
+            f"URL: {url}\n"
+            f"Malicious detections: {stats['malicious']}\n"
+            f"Suspicious detections: {stats['suspicious']}\n\n"
+            "Please take appropriate action."
+        )
+        await announcement_channel.send(announcement)
                 else:
                     await scanning_message.edit(content=result)
 
