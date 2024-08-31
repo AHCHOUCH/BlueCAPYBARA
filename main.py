@@ -92,7 +92,6 @@ async def get_analysis_result(analysis_id):
             
             status = result['data']['attributes']['status']
             if status == 'completed':
-                stats = result['data']['attributes']['stats']
                 return result['data']['attributes']
             elif status == 'queued' or status == 'in-progress':
                 if attempt < max_retries - 1:
@@ -111,7 +110,7 @@ async def get_analysis_result(analysis_id):
 
     return "Failed to get analysis result after multiple attempts."
 
-def generate_risk_message(stats):
+def generate_risk_message(stats, url):
     total_scans = sum(stats.values())
     malicious = stats['malicious']
     suspicious = stats['suspicious']
@@ -134,7 +133,9 @@ def generate_risk_message(stats):
         "Financial fraud"
     ]
     
-    risk_message = f"{emoji} **Risk Level: {risk_level}**\n\n"
+    risk_message = f"{emoji} **URL Risk Assessment**\n\n"
+    risk_message += f"**URL:** {url}\n"
+    risk_message += f"**Risk Level: {risk_level}**\n\n"
     risk_message += f"**Scan Results:**\n"
     risk_message += f"- Malicious: {malicious}\n"
     risk_message += f"- Suspicious: {suspicious}\n"
@@ -169,19 +170,20 @@ async def on_message(message):
             
             if isinstance(result, dict):
                 stats = result['stats']
-                risk_message = generate_risk_message(stats)
+                risk_message = generate_risk_message(stats, word)
                 await message.channel.send(risk_message)
                 
-                # Send report to "reports" channel if the URL is malicious
+                # Send report to "announcement" channel if the URL is malicious
                 if stats['malicious'] > 0:
-                    reports_channel = discord.utils.get(message.guild.channels, name='reports')
-                    if reports_channel:
-                        report = f"🚨 **Malicious URL Detected**\n\n"
-                        report += f"User: {message.author.mention}\n"
-                        report += f"Channel: {message.channel.mention}\n"
-                        report += f"URL: {word}\n\n"
-                        report += risk_message
-                        await reports_channel.send(report)
+                    announcement_channel = discord.utils.get(message.guild.channels, name='announcement')
+                    if announcement_channel:
+                        announcement = f"🚨 **Malicious URL Alert**\n\n"
+                        announcement += f"User {message.author.mention} posted a malicious URL in {message.channel.mention}.\n"
+                        announcement += f"URL: {word}\n"
+                        announcement += f"Malicious detections: {stats['malicious']}\n"
+                        announcement += f"Suspicious detections: {stats['suspicious']}\n\n"
+                        announcement += "Please take appropriate action."
+                        await announcement_channel.send(announcement)
             else:
                 await message.channel.send(result)
 
@@ -193,7 +195,7 @@ async def scan(ctx, url):
     await ctx.send(f"🔍 Scanning URL: {url}")
     result = await scan_url(url)
     if isinstance(result, dict):
-        risk_message = generate_risk_message(result['stats'])
+        risk_message = generate_risk_message(result['stats'], url)
         await ctx.send(risk_message)
     else:
         await ctx.send(result)
