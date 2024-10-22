@@ -116,7 +116,8 @@ async def on_message(message):
             
             if isinstance(result, dict):
                 stats = result['stats']
-                await scanning_message.edit(content=generate_risk_message(stats, word))
+                risk_message = generate_risk_message(stats, word)
+                await scanning_message.edit(content=risk_message)  # Edit the original scanning message
                 
                 if stats['malicious'] > 0:
                     announcement_channel = discord.utils.get(message.guild.channels, name='announcement')
