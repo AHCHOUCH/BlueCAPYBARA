@@ -73,7 +73,21 @@ async def get_analysis_result(analysis_id):
     
     return "Failed to get analysis result after multiple attempts."
 
+def generate_risk_message(stats, url):
+    malicious, suspicious, harmless = stats['malicious'], stats['suspicious'], stats['harmless']
+    risk_level, emoji = ("High", "🚨") if malicious > 0 else ("Medium", "⚠️") if suspicious > 0 else ("Low", "✅")
 
+    risk_message = (f"{emoji} **URL Risk Assessment**\n\n"
+                    f"**URL:** {url}\n**Risk Level:** {risk_level}\n\n"
+                    f"**Scan Results:**\n- Malicious: {malicious}\n- Suspicious: {suspicious}\n- Clean: {harmless}\n\n")
+
+    if risk_level != "Low":
+        risk_message += ("**Potential Risks:**\n- Malware infection\n- Phishing attempt\n- Data theft\n"
+                         "⚠️ **WARNING:** Visiting this URL may put your system and personal information at risk. Proceed with caution!")
+    else:
+        risk_message += "✅ This URL appears to be safe, but always exercise caution when clicking on links."
+
+    return risk_message
 
 @bot.event
 async def on_ready():
@@ -97,14 +111,6 @@ async def on_message(message):
                 stats = result['stats']
                 risk_message = generate_risk_message(stats, word)
                 await scanning_message.edit(content=risk_message)
-                
-                if stats['malicious'] > 0:
-                    announcement_channel = discord.utils.get(message.guild.channels, name='announcement')
-                    if announcement_channel:
-                        announcement = (f"🚨 **Malicious URL Alert**\n\nUser {message.author.mention} posted a malicious URL in "
-                                        f"{message.channel.mention}.\nURL: {word}\nMalicious detections: {stats['malicious']}\n"
-                                        f"Suspicious detections: {stats['suspicious']}")
-                        await announcement_channel.send(announcement)
             else:
                 await scanning_message.edit(content=result)
 
