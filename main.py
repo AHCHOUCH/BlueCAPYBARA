@@ -102,6 +102,11 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
+    # Check if the message is a command
+    if message.content.startswith(bot.command_prefix):
+        await bot.process_commands(message)
+        return  # Exit early to avoid scanning commands
+
     scanned_urls = set()  # To keep track of URLs we've already scanned in this message
     for word in message.content.split():
         if word.startswith(('http://', 'https://')) and word not in scanned_urls:
@@ -123,8 +128,8 @@ async def on_message(message):
             else:
                 await scanning_message.edit(content=result)
 
+    # Process commands after handling messages
     await bot.process_commands(message)
-
 # Start the Flask server to keep the bot alive
 keep_alive()
 
