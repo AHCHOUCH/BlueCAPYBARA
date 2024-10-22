@@ -1,18 +1,18 @@
 import os
-from dotenv import load_dotenv
 import discord
 from discord.ext import commands
-import requests
-import asyncio
+from dotenv import load_dotenv
 from flask import Flask
 from threading import Thread
+import requests
+import asyncio
 import time
 
 # Load environment variables
 load_dotenv()
 
 # Flask app to keep the bot alive
-app = Flask('')
+app = Flask(__name__)
 
 @app.route('/')
 def home():
@@ -23,7 +23,7 @@ def keep_alive():
 
 # Bot setup with explicit intents
 intents = discord.Intents.default()
-intents.message_content = True
+intents.message_content = True  # Required for reading message content
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # VirusTotal API setup
@@ -56,7 +56,6 @@ async def scan_url(url):
         result = response.json()
         return await get_analysis_result(result['data']['id'])
     except requests.exceptions.RequestException as e:
-        print(f"Error in scan_url: {str(e)}")
         return f"Error scanning URL: {str(e)}"
 
 async def get_analysis_result(analysis_id):
@@ -74,7 +73,6 @@ async def get_analysis_result(analysis_id):
                 return result['data']['attributes']
             await asyncio.sleep(10)
         except requests.exceptions.RequestException as e:
-            print(f"Error in get_analysis_result (attempt {attempt + 1}): {str(e)}")
             if attempt == 4:
                 return f"Error getting analysis result: {str(e)}"
     
@@ -127,7 +125,7 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-# Start the Flask server
+# Start the Flask server to keep the bot alive
 keep_alive()
 
 # Run the bot
