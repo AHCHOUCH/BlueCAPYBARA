@@ -6,7 +6,6 @@ from flask import Flask
 from threading import Thread
 import requests
 import asyncio
-import time
 
 # Load environment variables
 load_dotenv()
@@ -23,19 +22,17 @@ def keep_alive():
 
 # Bot setup with explicit intents
 intents = discord.Intents.default()
-intents.message_content = True  # Required for reading message content
+intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # VirusTotal API setup
 VIRUSTOTAL_API_KEY = os.getenv('VIRUSTOTAL_API_KEY')
 VIRUSTOTAL_API_URL = 'https://www.virustotal.com/api/v3/urls'
-
-# Rate limiting setup
 MAX_REQUESTS_PER_MINUTE = 4
 request_times = []
 
 async def check_rate_limit():
-    now = time.time()
+    now = asyncio.get_event_loop().time()
     request_times[:] = [t for t in request_times if now - t < 60]
     if len(request_times) >= MAX_REQUESTS_PER_MINUTE:
         await asyncio.sleep(60 - (now - request_times[0]))
@@ -53,8 +50,7 @@ async def scan_url(url):
     try:
         response = requests.post(VIRUSTOTAL_API_URL, headers=headers, data=data)
         response.raise_for_status()
-        result = response.json()
-        return await get_analysis_result(result['data']['id'])
+        return await get_analysis_result(response.json()['data']['id'])
     except requests.exceptions.RequestException as e:
         return f"Error scanning URL: {str(e)}"
 
@@ -63,7 +59,7 @@ async def get_analysis_result(analysis_id):
     headers = {"accept": "application/json", "x-apikey": VIRUSTOTAL_API_KEY}
     url = f"https://www.virustotal.com/api/v3/analyses/{analysis_id}"
 
-    for attempt in range(5):
+    for _ in range(5):
         try:
             response = requests.get(url, headers=headers)
             response.raise_for_status()
@@ -73,8 +69,7 @@ async def get_analysis_result(analysis_id):
                 return result['data']['attributes']
             await asyncio.sleep(10)
         except requests.exceptions.RequestException as e:
-            if attempt == 4:
-                return f"Error getting analysis result: {str(e)}"
+            continue
     
     return "Failed to get analysis result after multiple attempts."
 
@@ -82,7 +77,8 @@ def generate_risk_message(stats, url):
     malicious, suspicious, harmless = stats['malicious'], stats['suspicious'], stats['harmless']
     risk_level, emoji = ("High", "🚨") if malicious > 0 else ("Medium", "⚠️") if suspicious > 0 else ("Low", "✅")
     
-    risk_message = (f"{emoji} **URL Risk Assessment**\n\n**URL:** {url}\n**Risk Level: {risk_level}**\n\n"
+    risk_message = (f"{emoji} **URL Risk Assessment**\n\n"
+                    f"**URL:** {url}\n**Risk Level:** {risk_level}\n\n"
                     f"**Scan Results:**\n- Malicious: {malicious}\n- Suspicious: {suspicious}\n- Clean: {harmless}\n\n")
     
     if risk_level != "Low":
@@ -102,12 +98,9 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    # Check if the message is a command
-    if message.content.startswith(bot.command_prefix):
-        await bot.process_commands(message)
-        return  # Exit early to avoid scanning commands
-
-    scanned_urls = set()  # To keep track of URLs we've already scanned in this message
+    # Check for URLs in the message content
+    scanned_urls = set()
+    
     for word in message.content.split():
         if word.startswith(('http://', 'https://')) and word not in scanned_urls:
             scanned_urls.add(word)
@@ -117,20 +110,18 @@ async def on_message(message):
             if isinstance(result, dict):
                 stats = result['stats']
                 risk_message = generate_risk_message(stats, word)
-                await scanning_message.edit(content=risk_message)  # Edit the original scanning message
+                await scanning_message.edit(content=risk_message)
                 
                 if stats['malicious'] > 0:
                     announcement_channel = discord.utils.get(message.guild.channels, name='announcement')
                     if announcement_channel:
                         announcement = (f"🚨 **Malicious URL Alert**\n\nUser {message.author.mention} posted a malicious URL in "
                                         f"{message.channel.mention}.\nURL: {word}\nMalicious detections: {stats['malicious']}\n"
-                                        f"Suspicious detections: {stats['suspicious']}\n\nPlease take appropriate action.")
+                                        f"Suspicious detections: {stats['suspicious']}")
                         await announcement_channel.send(announcement)
             else:
                 await scanning_message.edit(content=result)
 
-    # Process commands after handling messages
-    await bot.process_commands(message)
 # Start the Flask server to keep the bot alive
 keep_alive()
 
